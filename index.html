@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#1e3a5f" />
+  <title>סוכן בדיקת נזקים</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    #report-text { white-space: pre-wrap; }
+    .spinner {
+      width: 40px; height: 40px;
+      border: 4px solid #e5e7eb;
+      border-top-color: #1e3a5f;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col items-center justify-start py-10 px-4">
+
+  <!-- ===== HEADER ===== -->
+  <div class="w-full max-w-md mb-6 text-center">
+    <h1 class="text-3xl font-bold text-blue-900">🔍 סוכן בדיקת נזקים</h1>
+    <p class="text-gray-500 text-sm mt-1">צלם נזק ובניה – קבל דוח מקצועי תוך שניות</p>
+  </div>
+
+  <!-- ===== CAPTURE CARD ===== -->
+  <div class="w-full max-w-md bg-white rounded-2xl shadow-lg p-6 mb-4">
+
+    <!-- Hidden real input — opens rear camera on mobile -->
+    <input
+      type="file"
+      accept="image/*"
+      capture="environment"
+      id="cameraInput"
+      class="hidden"
+    />
+
+    <!-- Preview image (hidden until photo taken) -->
+    <div id="previewWrapper" class="hidden mb-4">
+      <img id="preview" class="w-full rounded-xl object-cover max-h-64" alt="תמונת נזק" />
+    </div>
+
+    <!-- CTA Button -->
+    <button
+      id="captureBtn"
+      onclick="document.getElementById('cameraInput').click()"
+      class="w-full bg-blue-900 hover:bg-blue-800 active:bg-blue-950 text-white font-semibold text-lg py-4 rounded-xl transition-colors flex items-center justify-center gap-3"
+    >
+      <span>📸</span>
+      <span>צלם תמונה של הנזק</span>
+    </button>
+
+    <!-- Analyze Button (appears after photo is chosen) -->
+    <button
+      id="analyzeBtn"
+      class="hidden w-full mt-3 bg-green-700 hover:bg-green-600 text-white font-semibold text-lg py-4 rounded-xl transition-colors flex items-center justify-center gap-3"
+    >
+      <span>🔬</span>
+      <span>נתח את הנזק</span>
+    </button>
+  </div>
+
+  <!-- ===== LOADING STATE ===== -->
+  <div id="loadingCard" class="hidden w-full max-w-md bg-white rounded-2xl shadow-lg p-6 mb-4 flex flex-col items-center gap-4">
+    <div class="spinner"></div>
+    <p class="text-blue-900 font-medium text-center">הסוכן מנתח את התמונה... נא להמתין</p>
+  </div>
+
+  <!-- ===== ERROR STATE ===== -->
+  <div id="errorCard" class="hidden w-full max-w-md bg-red-50 border border-red-300 rounded-2xl shadow p-5 mb-4">
+    <p class="text-red-700 font-semibold text-center">⚠️ שגיאה בחיבור לשרת</p>
+    <p id="errorDetail" class="text-red-500 text-sm text-center mt-1"></p>
+  </div>
+
+  <!-- ===== REPORT CARD ===== -->
+  <div id="reportCard" class="hidden w-full max-w-md bg-white rounded-2xl shadow-lg p-6 mb-10">
+    <h2 class="text-xl font-bold text-blue-900 mb-3 border-b border-gray-200 pb-2">📋 דוח הבדיקה</h2>
+    <p id="report-text" class="text-gray-700 text-sm leading-relaxed"></p>
+    <button
+      onclick="resetAll()"
+      class="mt-5 w-full border border-blue-900 text-blue-900 hover:bg-blue-50 font-semibold py-3 rounded-xl transition-colors"
+    >
+      🔄 בדיקה חדשה
+    </button>
+  </div>
+
+  <script>
+    // ─── CONFIG ───────────────────────────────────────────────────────────────
+    // Replace with your actual Railway backend URL after deployment
+    const BACKEND_URL = "https://api-production-29e0.up.railway.app/analyze";
+    // ─────────────────────────────────────────────────────────────────────────
+
+    let base64Image = null;
+
+    const cameraInput   = document.getElementById("cameraInput");
+    const previewWrapper= document.getElementById("previewWrapper");
+    const preview       = document.getElementById("preview");
+    const captureBtn    = document.getElementById("captureBtn");
+    const analyzeBtn    = document.getElementById("analyzeBtn");
+    const loadingCard   = document.getElementById("loadingCard");
+    const errorCard     = document.getElementById("errorCard");
+    const errorDetail   = document.getElementById("errorDetail");
+    const reportCard    = document.getElementById("reportCard");
+    const reportText    = document.getElementById("report-text");
+
+    // ── When user picks / captures an image ──────────────────────────────────
+    cameraInput.addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const dataURL = ev.target.result;
+        // Strip "data:image/...;base64," prefix to get raw Base64
+        base64Image = dataURL.split(",")[1];
+
+        // Show preview
+        preview.src = dataURL;
+        previewWrapper.classList.remove("hidden");
+        analyzeBtn.classList.remove("hidden");
+
+        // Hide any previous results
+        reportCard.classList.add("hidden");
+        errorCard.classList.add("hidden");
+      };
+      reader.readAsDataURL(file);
+    });
+
+    // ── Analyze button click ──────────────────────────────────────────────────
+    analyzeBtn.addEventListener("click", async () => {
+      if (!base64Image) return;
+
+      // Show loading, hide everything else
+      loadingCard.classList.remove("hidden");
+      analyzeBtn.classList.add("hidden");
+      captureBtn.classList.add("hidden");
+      reportCard.classList.add("hidden");
+      errorCard.classList.add("hidden");
+
+      try {
+        const response = await fetch(BACKEND_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ image: base64Image }),
+        });
+
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({}));
+          throw new Error(err.error || `HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        reportText.textContent = data.report;
+        reportCard.classList.remove("hidden");
+      } catch (err) {
+        errorDetail.textContent = err.message || "";
+        errorCard.classList.remove("hidden");
+        analyzeBtn.classList.remove("hidden");
+      } finally {
+        loadingCard.classList.add("hidden");
+        captureBtn.classList.remove("hidden");
+      }
+    });
+
+    // ── Reset everything ──────────────────────────────────────────────────────
+    function resetAll() {
+      base64Image = null;
+      cameraInput.value = "";
+      preview.src = "";
+      previewWrapper.classList.add("hidden");
+      analyzeBtn.classList.add("hidden");
+      reportCard.classList.add("hidden");
+      errorCard.classList.add("hidden");
+      loadingCard.classList.add("hidden");
+    }
+  </script>
+
+</body>
+</html>
